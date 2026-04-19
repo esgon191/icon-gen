@@ -74,15 +74,15 @@ sequenceDiagram
     participant MinIO
     participant PG as PostgreSQL
 
-    Admin->>Router: POST /v1/context<br/>(prompt, file)
-    Router->>Router: генерируем object_key<br/>= uuid4().ext
-    Router->>Storage: put(key, bytes, content_type)
+    Admin->>Router: POST /v1/context с prompt и file
+    Router->>Router: генерирует object_key = uuid.ext
+    Router->>Storage: put key + bytes
     Storage->>MinIO: PutObject
-    Router->>Repo: add(object_key, prompt, content_type)
+    Router->>Repo: add object_key + prompt
     Repo->>PG: INSERT INTO style_context
-    PG-->>Repo: id, created_at
+    PG-->>Repo: id + created_at
     Repo-->>Router: StyleContext
-    Router-->>Admin: 201 { id, object_key, prompt, ... }
+    Router-->>Admin: 201 Created
 ```
 
 Метаданные и бинарник живут раздельно, но связаны через `object_key`:
@@ -112,21 +112,21 @@ sequenceDiagram
     participant LLM as LLMClient
     participant T2I as T2IClient
 
-    User->>OWU: "иконка настроек"
-    OWU->>Router: POST /v1/chat/completions<br/>{messages, model: icon-gen}
-    Router->>Svc: generate(prompt)
-    Svc->>Repo: random(10)
-    Repo-->>Svc: 10 × StyleContext
+    User->>OWU: текстовый промпт
+    OWU->>Router: POST /v1/chat/completions
+    Router->>Svc: generate prompt
+    Svc->>Repo: random N
+    Repo-->>Svc: список StyleContext
     loop для каждого семпла
-        Svc->>Storage: get(object_key)
+        Svc->>Storage: get по object_key
         Storage-->>Svc: bytes
     end
-    Svc->>LLM: describe_style(prompt, samples)
-    LLM-->>Svc: "минимализм, flat, синий градиент..."
-    Svc->>T2I: generate(prompt, style)
+    Svc->>LLM: describe_style
+    LLM-->>Svc: описание стиля
+    Svc->>T2I: generate
     T2I-->>Svc: PNG bytes
-    Svc-->>Router: { prompt, style, image_base64 }
-    Router->>Router: оборачиваем в<br/>![icon](data:image/png;base64,...)
+    Svc-->>Router: prompt + style + image_base64
+    Router->>Router: оборачивает картинку в markdown data-URI
     Router-->>OWU: OpenAI chat completion
     OWU-->>User: картинка в чате
 ```
