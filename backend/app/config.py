@@ -17,5 +17,9 @@ class Settings(BaseSettings):
 
     context_sample_size: int = 10
 
+    # Сервис анализа стиля (icon-style от Темыча).
+    icon_style_url: str = "http://icon-style:8000"
+    icon_style_timeout: float = 180.0
+
 
 settings = Settings()

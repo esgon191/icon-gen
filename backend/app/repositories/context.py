@@ -10,9 +10,18 @@ class ContextRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def add(self, object_key: str, prompt: str, content_type: str) -> StyleContext:
+    def add(
+        self,
+        object_key: str,
+        prompt: str,
+        content_type: str,
+        style_description: str | None = None,
+    ) -> StyleContext:
         item = StyleContext(
-            object_key=object_key, prompt=prompt, content_type=content_type
+            object_key=object_key,
+            prompt=prompt,
+            content_type=content_type,
+            style_description=style_description,
         )
         self.db.add(item)
         self.db.commit()
@@ -41,3 +50,12 @@ class ContextRepository:
     def random(self, n: int) -> Sequence[StyleContext]:
         stmt = select(StyleContext).order_by(func.random()).limit(n)
         return self.db.execute(stmt).scalars().all()
+
+    def set_style_description(self, item_id: str, description: str | None) -> StyleContext | None:
+        item = self.get(item_id)
+        if item is None:
+            return None
+        item.style_description = description
+        self.db.commit()
+        self.db.refresh(item)
+        return item

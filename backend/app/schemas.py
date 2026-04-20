@@ -10,6 +10,7 @@ class ContextItem(BaseModel):
     object_key: str
     prompt: str
     content_type: str
+    style_description: str | None = None
     created_at: datetime
 
 

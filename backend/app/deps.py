@@ -3,8 +3,8 @@ from functools import lru_cache
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from .clients.base import LLMClient, StorageClient, T2IClient
-from .clients.llm import StubLLMClient
+from .clients.analyzer import OllamaStyleAnalyzerClient
+from .clients.base import StorageClient, StyleAnalyzer, T2IClient
 from .clients.storage import S3Storage
 from .clients.t2i import StubT2IClient
 from .database import get_db
@@ -18,8 +18,8 @@ def get_storage() -> StorageClient:
 
 
 @lru_cache
-def get_llm() -> LLMClient:
-    return StubLLMClient()
+def get_style_analyzer() -> StyleAnalyzer:
+    return OllamaStyleAnalyzerClient()
 
 
 @lru_cache
@@ -34,7 +34,6 @@ def get_context_repo(db: Session = Depends(get_db)) -> ContextRepository:
 def get_generation_service(
     repo: ContextRepository = Depends(get_context_repo),
     storage: StorageClient = Depends(get_storage),
-    llm: LLMClient = Depends(get_llm),
     t2i: T2IClient = Depends(get_t2i),
 ) -> GenerationService:
-    return GenerationService(repo, storage, llm, t2i)
+    return GenerationService(repo, storage, t2i)
