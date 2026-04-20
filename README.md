@@ -16,7 +16,7 @@ style-описания и отправляет стиль + пользовате
 - **FastAPI** — API слой (порт 8000)
 - **PostgreSQL** — метаданные (`object_key`, `prompt`, `style_description`)
 - **MinIO** — S3-совместимое хранилище для бинарников картинок
-- **icon-style** — микросервис Темыча (FastAPI + Ollama + LLaVA:13b), анализ стиля (порт 8001)
+- **icon-style** — микросервис (FastAPI + Ollama + LLaVA:13b), анализ стиля (порт 8001)
 - **SQLAlchemy** — ORM
 - **Docker Compose** — оркестрация всех сервисов
 
