@@ -1,56 +1,57 @@
 # icon-gen
 
-Генератор иконок. Пользователь пишет промпт в OpenWebUI, бэкенд берёт
-N случайных референсов из хранилища, склеивает их заранее посчитанные
-style-описания и отправляет стиль + пользовательский промпт в Text-to-Image
-модель. Результат возвращается в OpenWebUI картинкой в чат.
+Icon generator. The user writes a prompt in OpenWebUI, the backend takes
+N random references from storage, concatenates their pre-computed
+style descriptions, and sends the style + user prompt to a Text-to-Image
+model. The result is returned to OpenWebUI as an image in the chat.
 
-**Ключевое решение:** vision-LLM (LLaVA через Ollama) анализирует
-**каждый референс один раз при загрузке** и сохраняет описание стиля в БД.
-На запрос генерации никакого LLM не дёргается — берём готовые описания.
-Это делает сам момент генерации быстрым и снимает зависимость T2I от
-доступности Ollama.
+**Key design decision:** a vision LLM (LLaVA via Ollama) analyzes
+**each reference once, at upload time**, and stores the style description in the DB.
+No LLM is called on generation requests — ready-made descriptions are used instead.
+This keeps the generation step fast and removes T2I's dependency on
+Ollama's availability.
 
-## Стек
+## Stack
 
-- **FastAPI** — API слой (порт 8000)
-- **PostgreSQL** — метаданные (`object_key`, `prompt`, `style_description`)
-- **MinIO** — S3-совместимое хранилище для бинарников картинок
-- **icon-style** — микросервис (FastAPI + Ollama + LLaVA:13b), анализ стиля (порт 8001)
+- **FastAPI** — API layer (port 8000)
+- **PostgreSQL** — metadata (`object_key`, `prompt`, `style_description`)
+- **MinIO** — S3-compatible storage for image binaries
+- **icon-style** — microservice (FastAPI + Ollama + LLaVA:13b), style analysis (port 8001)
 - **SQLAlchemy** — ORM
-- **Docker Compose** — оркестрация всех сервисов
+- **Docker Compose** — orchestration for all services
 
-T2I сейчас стаб (`StubT2IClient`) — при подключении реальной модели
-добавляется новая реализация в `backend/app/clients/` и меняется фабрика
-в `backend/app/deps.py`. Остальной код не трогается.
+T2I is currently a stub (`StubT2IClient`) — when connecting a real model,
+a new implementation is added in `backend/app/clients/` and the factory
+in `backend/app/deps.py` is updated. The rest of the code stays untouched.
 
-## Запуск
+## Running
 
-### Предварительно — Ollama на хосте
+### Prerequisite — Ollama on the host
 
-LLaVA работает через Ollama, которая запускается на хосте (не в docker, чтобы не тянуть в образ 8+ ГБ модели и видеокарту).
+LLaVA runs through Ollama, which runs on the host (not in Docker, to avoid
+pulling 8+ GB of model weights and the GPU into the image).
 
 ```bash
-# 1. Поставить Ollama с https://ollama.com/download
-# 2. Запустить сервер
+# 1. Install Ollama from https://ollama.com/download
+# 2. Start the server
 ollama serve &
-# 3. Скачать модель (один раз, ~8 ГБ)
+# 3. Pull the model (once, ~8 GB)
 ollama pull llava:13b
 ```
 
-### Запуск проекта
+### Running the project
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-- Backend API: http://localhost:8000 (Swagger UI на `/docs`)
-- icon-style API: http://localhost:8001 (Swagger UI на `/docs`)
-- MinIO консоль: http://localhost:9001 (`minioadmin` / `minioadmin`)
+- Backend API: http://localhost:8000 (Swagger UI at `/docs`)
+- icon-style API: http://localhost:8001 (Swagger UI at `/docs`)
+- MinIO console: http://localhost:9001 (`minioadmin` / `minioadmin`)
 - Postgres: `localhost:5432` (`icon` / `icon`)
 
-Проверить что icon-style видит Ollama:
+Check that icon-style can see Ollama:
 ```bash
 curl http://localhost:8001/health
 # {"status":"ok","ollama_available":true,...}
@@ -58,29 +59,29 @@ curl http://localhost:8001/health
 
 ---
 
-## Архитектура
+## Architecture
 
-### Общая схема сервисов
+### Overall service diagram
 
 ```mermaid
 flowchart LR
-    User([Пользователь])
-    OWU[OpenWebUI<br/>Андрюха]
+    User([User])
+    OWU[OpenWebUI<br/>Andryukha]
     BE[Backend<br/>FastAPI]
-    IS[icon-style<br/>Темыч]
+    IS[icon-style<br/>Tyomych]
     OL[Ollama<br/>LLaVA:13b]
-    T2I[Text-to-Image<br/>Тимур]
-    PG[(PostgreSQL<br/>метаданные + style)]
-    S3[(MinIO / S3<br/>бинарники)]
+    T2I[Text-to-Image<br/>Timur]
+    PG[(PostgreSQL<br/>metadata + style)]
+    S3[(MinIO / S3<br/>binaries)]
 
-    User -->|текст| OWU
+    User -->|text| OWU
     OWU <-->|OpenAI-compatible| BE
-    BE -->|при загрузке<br/>картинка| IS
+    BE -->|on upload<br/>image| IS
     IS <-->|vision prompt| OL
     IS -->|style_prompt| BE
-    BE <-->|промпт + style| T2I
+    BE <-->|prompt + style| T2I
     BE <-->|CRUD + style_description| PG
-    BE <-->|put/get/delete<br/>по object_key| S3
+    BE <-->|put/get/delete<br/>by object_key| S3
 
     style BE fill:#d1e7ff,stroke:#0066cc
     style PG fill:#e7d9ff,stroke:#6b2fc0
@@ -88,18 +89,18 @@ flowchart LR
     style IS fill:#fff4b0,stroke:#b08800
 ```
 
-Бэкенд — центральный хаб. Связь с icon-style идёт **только на аплоаде**
-референса: анализ стиля выполняется один раз и сохраняется в Postgres.
-При генерации иконки vision-LLM не дёргается. Все внешние сервисы за
-Protocol-интерфейсами, реальные реализации подключаются без переписывания
-бизнес-логики.
+The backend is the central hub. Communication with icon-style happens
+**only on reference upload**: style analysis runs once and is saved to
+Postgres. The vision LLM is not called during icon generation. All external
+services sit behind Protocol interfaces, so real implementations can be
+plugged in without rewriting business logic.
 
-### Flow 1 — загрузка референса (`POST /v1/context`)
+### Flow 1 — uploading a reference (`POST /v1/context`)
 
-Администратор/куратор заливает в хранилище картинку с текстовым описанием —
-это "контекст стиля", которым потом будет кормиться T2I. На этом же шаге
-бэкенд просит icon-style описать визуальный стиль картинки, и описание
-кладётся рядом в БД.
+An admin/curator uploads an image with a text description to storage —
+this is the "style context" that will later feed the T2I model. In the same
+step, the backend asks icon-style to describe the image's visual style,
+and the description is stored alongside it in the DB.
 
 ```mermaid
 sequenceDiagram
@@ -112,14 +113,14 @@ sequenceDiagram
     participant IS as icon-style + Ollama
     participant PG as PostgreSQL
 
-    Admin->>Router: POST /v1/context с prompt и file
-    Router->>Router: генерирует object_key = uuid.ext
+    Admin->>Router: POST /v1/context with prompt and file
+    Router->>Router: generates object_key = uuid.ext
     Router->>Storage: put key + bytes
     Storage->>MinIO: PutObject
     Router->>Analyzer: analyze image_bytes
     Analyzer->>IS: POST /analyze
-    IS-->>Analyzer: style_prompt или ошибка
-    Analyzer-->>Router: string или None
+    IS-->>Analyzer: style_prompt or error
+    Analyzer-->>Router: string or None
     Router->>Repo: add object_key + prompt + style_description
     Repo->>PG: INSERT INTO style_context
     PG-->>Repo: id + created_at
@@ -127,10 +128,11 @@ sequenceDiagram
     Router-->>Admin: 201 Created
 ```
 
-Если icon-style недоступен — запись всё равно создаётся со `style_description = null`.
-Запустить повторный анализ можно через `POST /v1/context/{id}/reanalyze`.
+If icon-style is unavailable, the record is still created with
+`style_description = null`. A re-analysis can be triggered later via
+`POST /v1/context/{id}/reanalyze`.
 
-Метаданные и бинарник живут раздельно, но связаны через `object_key`:
+Metadata and the binary live separately, linked via `object_key`:
 
 ```
 PostgreSQL                                   MinIO bucket "icon-context"
@@ -138,7 +140,7 @@ PostgreSQL                                   MinIO bucket "icon-context"
 │ style_context                         │     │ ab12cd34.png   [binary]    │
 │  id                = "..."            │     │ ef56gh78.jpg   [binary]    │
 │  object_key        = "ab12cd34.png"  ─┼────▶│ ...                        │
-│  prompt            = "синяя иконка"   │     │                            │
+│  prompt            = "blue icon"      │     │                            │
 │  style_description = "flat vector     │     └────────────────────────────┘
 │                       icon, bold      │
 │                       outlines, ..."  │
@@ -147,7 +149,7 @@ PostgreSQL                                   MinIO bucket "icon-context"
 └───────────────────────────────────────┘
 ```
 
-### Flow 2 — генерация иконки (`POST /v1/chat/completions` из OpenWebUI)
+### Flow 2 — icon generation (`POST /v1/chat/completions` from OpenWebUI)
 
 ```mermaid
 sequenceDiagram
@@ -158,54 +160,55 @@ sequenceDiagram
     participant Repo as ContextRepository
     participant T2I as T2IClient
 
-    User->>OWU: текстовый промпт
+    User->>OWU: text prompt
     OWU->>Router: POST /v1/chat/completions
     Router->>Svc: generate prompt
     Svc->>Repo: random N
-    Repo-->>Svc: N × StyleContext со style_description
-    Svc->>Svc: агрегирует описания в одну style-строку
+    Repo-->>Svc: N × StyleContext with style_description
+    Svc->>Svc: aggregates descriptions into one style string
     Svc->>T2I: generate prompt + style
     T2I-->>Svc: PNG bytes
     Svc-->>Router: prompt + style + image_base64
-    Router->>Router: оборачивает картинку в markdown data-URI
+    Router->>Router: wraps the image in a markdown data-URI
     Router-->>OWU: OpenAI chat completion
-    OWU-->>User: картинка в чате
+    OWU-->>User: image in chat
 ```
 
-На этом шаге ни vision-LLM, ни S3 не дёргаются — всё нужное уже лежит
-в Postgres. Только если style_description у всех семплов будут null,
-style-строка окажется пустой, и T2I получит голый пользовательский промпт.
+At this step neither the vision LLM nor S3 is called — everything needed
+already lives in Postgres. Only if every sampled `style_description` is
+null does the style string end up empty, leaving T2I with the bare user
+prompt.
 
-### Слои и зависимости в коде
+### Layers and dependencies in the code
 
 ```mermaid
 flowchart TB
-    subgraph HTTP ["HTTP слой"]
+    subgraph HTTP ["HTTP layer"]
         R1[routers/context.py]
         R2[routers/generate.py]
         R3[routers/openai.py]
     end
 
-    subgraph Business ["Бизнес-логика"]
+    subgraph Business ["Business logic"]
         S[services/generation.py<br/>GenerationService]
     end
 
-    subgraph Data ["Доступ к данным"]
+    subgraph Data ["Data access"]
         Repo[repositories/context.py<br/>ContextRepository]
     end
 
-    subgraph Clients ["Внешние клиенты<br/>Protocol + реализация"]
+    subgraph Clients ["External clients<br/>Protocol + implementation"]
         Proto[clients/base.py<br/>Protocols]
         ST[clients/storage.py<br/>S3Storage]
         AN[clients/analyzer.py<br/>OllamaStyleAnalyzerClient]
         TT[clients/t2i.py<br/>StubT2IClient]
     end
 
-    subgraph Infra ["Инфраструктура"]
+    subgraph Infra ["Infrastructure"]
         DB[(PostgreSQL)]
         S3[(MinIO)]
         IS[icon-style + Ollama]
-        Future1[[будущее:<br/>ComfyUIT2IClient]]
+        Future1[[future:<br/>ComfyUIT2IClient]]
     end
 
     R1 --> Repo
@@ -218,59 +221,59 @@ flowchart TB
     Repo --> DB
     ST --> S3
     AN --> IS
-    AN -.реализует.-> Proto
-    TT -.реализует.-> Proto
-    ST -.реализует.-> Proto
-    Future1 -.реализует.-> Proto
+    AN -.implements.-> Proto
+    TT -.implements.-> Proto
+    ST -.implements.-> Proto
+    Future1 -.implements.-> Proto
 
     style Proto fill:#fff4b0,stroke:#b08800
     style Future1 fill:#e8f5e9,stroke:#2e7d32,stroke-dasharray: 5 5
     style Future2 fill:#e8f5e9,stroke:#2e7d32,stroke-dasharray: 5 5
 ```
 
-**Ключевой инвариант:** `GenerationService` зависит только от Protocol'ов,
-не от конкретных классов. Замена стабов на реальные модели — это одна
-строка в `deps.py`, всё остальное не меняется.
+**Key invariant:** `GenerationService` only depends on Protocols,
+never on concrete classes. Swapping stubs for real models is a one-line
+change in `deps.py` — nothing else needs to change.
 
 ---
 
 ## API
 
-### Хранилище референсов
+### Reference storage
 
-| Метод | Путь | Тело | Описание |
+| Method | Path | Body | Description |
 |---|---|---|---|
-| `POST` | `/v1/context` | `multipart: prompt, file` | Загрузить картинку-референс (синхронно вызовет анализ стиля, ~15–30 сек на LLaVA:13b) |
-| `GET` | `/v1/context` | — | Список всех референсов |
-| `DELETE` | `/v1/context/{id}` | — | Удалить референс (из БД и S3) |
-| `POST` | `/v1/context/{id}/reanalyze` | — | Переанализировать стиль — если при загрузке Ollama была недоступна |
+| `POST` | `/v1/context` | `multipart: prompt, file` | Upload a reference image (synchronously triggers style analysis, ~15–30 sec on LLaVA:13b) |
+| `GET` | `/v1/context` | — | List all references |
+| `DELETE` | `/v1/context/{id}` | — | Delete a reference (from DB and S3) |
+| `POST` | `/v1/context/{id}/reanalyze` | — | Re-analyze style — for when Ollama was unavailable at upload time |
 
-### Генерация
+### Generation
 
-| Метод | Путь | Описание |
+| Method | Path | Description |
 |---|---|---|
-| `POST` | `/v1/generate` | Внутренний эндпоинт для отладки: `{prompt, n?}` → `{image_base64, style, ...}` |
-| `GET` | `/v1/models` | OpenAI-совместимый, для OpenWebUI |
-| `POST` | `/v1/chat/completions` | OpenAI-совместимый, для OpenWebUI |
+| `POST` | `/v1/generate` | Internal debugging endpoint: `{prompt, n?}` → `{image_base64, style, ...}` |
+| `GET` | `/v1/models` | OpenAI-compatible, for OpenWebUI |
+| `POST` | `/v1/chat/completions` | OpenAI-compatible, for OpenWebUI |
 
-### Подключение к OpenWebUI
+### Connecting to OpenWebUI
 
 `Settings → Connections → OpenAI API`:
 
-- URL: `http://backend:8000/v1` (если OpenWebUI в том же `docker-compose.yml`)
-  или `http://host.docker.internal:8000/v1` (если OpenWebUI в отдельном контейнере на том же хосте)
-- API Key: любая непустая строка (авторизация пока не проверяется)
-- В списке моделей появится `icon-gen`
+- URL: `http://backend:8000/v1` (if OpenWebUI is in the same `docker-compose.yml`)
+  or `http://host.docker.internal:8000/v1` (if OpenWebUI is in a separate container on the same host)
+- API Key: any non-empty string (authorization isn't checked yet)
+- `icon-gen` will appear in the model list
 
 ---
 
-## Структура проекта
+## Project structure
 
 ```
 icon-gen/
 ├── docker-compose.yml           # postgres + minio + icon-style + backend
-├── .env.example                 # шаблон конфига
-├── icon-style/                  # микросервис Темыча (FastAPI + Ollama LLaVA)
+├── .env.example                 # config template
+├── icon-style/                  # Tyomych's microservice (FastAPI + Ollama LLaVA)
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── main.py
@@ -278,55 +281,55 @@ icon-gen/
     ├── Dockerfile
     ├── requirements.txt
     └── app/
-        ├── main.py              # FastAPI, lifespan, миграции, роутеры
-        ├── config.py            # Settings через env
+        ├── main.py              # FastAPI, lifespan, migrations, routers
+        ├── config.py            # Settings via env
         ├── database.py          # SQLAlchemy engine/session
-        ├── models.py            # ORM (таблица style_context)
-        ├── schemas.py           # Pydantic для API
-        ├── deps.py              # DI — точка замены реализаций клиентов
+        ├── models.py            # ORM (style_context table)
+        ├── schemas.py           # Pydantic for the API
+        ├── deps.py              # DI — the swap point for client implementations
         ├── clients/
         │   ├── base.py          # Protocols: StorageClient / StyleAnalyzer / T2IClient
         │   ├── storage.py       # S3Storage (MinIO / AWS S3)
-        │   ├── analyzer.py      # OllamaStyleAnalyzerClient → icon-style сервис
+        │   ├── analyzer.py      # OllamaStyleAnalyzerClient → icon-style service
         │   └── t2i.py           # StubT2IClient
         ├── repositories/
         │   └── context.py       # CRUD + random(n) + set_style_description
         ├── services/
         │   └── generation.py    # repo → aggregate styles → t2i
         └── routers/
-            ├── context.py       # CRUD референсов + /reanalyze
-            ├── generate.py      # Внутренний /v1/generate
-            └── openai.py        # OpenAI-совместимые эндпоинты для OpenWebUI
+            ├── context.py       # reference CRUD + /reanalyze
+            ├── generate.py      # internal /v1/generate
+            └── openai.py        # OpenAI-compatible endpoints for OpenWebUI
 ```
 
 ---
 
-## Как расширять
+## How to extend
 
-**Подключить реальный T2I:**
-1. Создать `backend/app/clients/t2i_comfy.py` (или любой другой файл) с
-   классом, реализующим метод `generate(user_prompt, style) -> tuple[bytes, str]`.
-2. В `backend/app/deps.py` заменить `return StubT2IClient()` на
-   `return ComfyT2IClient()` в `get_t2i()`.
-3. Всё. Ни роутеры, ни сервис, ни БД не трогаются.
+**Connect a real T2I model:**
+1. Create `backend/app/clients/t2i_comfy.py` (or any other filename) with
+   a class implementing `generate(user_prompt, style) -> tuple[bytes, str]`.
+2. In `backend/app/deps.py`, replace `return StubT2IClient()` with
+   `return ComfyT2IClient()` in `get_t2i()`.
+3. That's it. No router, service, or DB code needs to change.
 
-**Свой анализатор стиля** (если когда-нибудь захочется мимо Темыча) —
-в `clients/analyzer.py` добавить новый класс с методом `analyze(image_bytes,
-content_type) -> str | None`, заменить фабрику `get_style_analyzer()`.
+**Custom style analyzer** (in case you ever want to skip Tyomych's service) —
+add a new class with an `analyze(image_bytes, content_type) -> str | None`
+method to `clients/analyzer.py`, and swap the `get_style_analyzer()` factory.
 
-**Хранилище** — `S3Storage` можно заменить env-переменными (AWS S3
-вместо MinIO). Для локальной ФС — написать `LocalStorage` с теми же
-методами `put/get/delete`.
+**Storage** — `S3Storage` can be repointed via env variables (AWS S3
+instead of MinIO). For local filesystem storage, write a `LocalStorage`
+class with the same `put/get/delete` methods.
 
-## Настройки (`.env`)
+## Settings (`.env`)
 
-| Переменная | По умолчанию | Назначение |
+| Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `postgresql+psycopg://icon:icon@postgres:5432/icon` | Строка подключения к Postgres |
-| `S3_ENDPOINT` | `http://minio:9000` | Адрес S3 API |
-| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | `minioadmin` / `minioadmin` | Ключи S3 |
-| `S3_BUCKET` | `icon-context` | Имя бакета (создаётся автоматически при старте) |
-| `ICON_STYLE_URL` | `http://icon-style:8000` | Адрес сервиса анализа стиля |
-| `ICON_STYLE_TIMEOUT` | `180` | Таймаут запроса к icon-style, секунд (LLaVA:13b бывает медленной) |
-| `CONTEXT_SAMPLE_SIZE` | `10` | Сколько референсов брать при генерации |
-| `LLM_PROVIDER` / `T2I_PROVIDER` | `stub` | Задел для выбора реализации через env (пока не используется) |
+| `DATABASE_URL` | `postgresql+psycopg://icon:icon@postgres:5432/icon` | Postgres connection string |
+| `S3_ENDPOINT` | `http://minio:9000` | S3 API address |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | `minioadmin` / `minioadmin` | S3 keys |
+| `S3_BUCKET` | `icon-context` | Bucket name (created automatically on startup) |
+| `ICON_STYLE_URL` | `http://icon-style:8000` | Style analysis service address |
+| `ICON_STYLE_TIMEOUT` | `180` | Request timeout to icon-style, seconds (LLaVA:13b can be slow) |
+| `CONTEXT_SAMPLE_SIZE` | `10` | How many references to sample for generation |
+| `LLM_PROVIDER` / `T2I_PROVIDER` | `stub` | Placeholder for selecting an implementation via env (not yet used) |
