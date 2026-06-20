@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: icon
+      POSTGRES_PASSWORD: icon
+      POSTGRES_DB: icon
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U icon -d icon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+  # Сервис анализа стиля иконок (код Темыча), обёртка над Ollama + LLaVA.
+  # Ollama должна быть запущена на хосте: `ollama serve` + `ollama pull llava:13b`.
+  icon-style:
+    build: ./icon-style
+    environment:
+      ICON_STYLE_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      ICON_STYLE_MODEL: llava:13b
+      ICON_STYLE_TIMEOUT: "180"
+    ports:
+      - "8001:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      ICON_STYLE_URL: http://icon-style:8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      icon-style:
+        condition: service_started
+
+volumes:
+  pgdata:
+  miniodata:
